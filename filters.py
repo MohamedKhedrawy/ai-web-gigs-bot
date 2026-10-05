@@ -74,6 +74,16 @@ RELEVANT_KEYWORDS = [
 ]
 
 
+EXCLUDED_KEYWORDS = [
+    "flutter",
+    ".net",
+    "translation",
+    "ترجمة",
+    "motion graphic",
+    "مونتاج"
+]
+
+
 def get_matched_keywords(title, description=""):
     text = f"{title} {description}".lower()
 
@@ -87,6 +97,12 @@ def get_matched_keywords(title, description=""):
 
 
 def is_relevant_job(title, description=""):
+    text = f"{title} {description}".lower()
+
+    for keyword in EXCLUDED_KEYWORDS:
+        if keyword.lower() in text:
+            return False
+
     return len(
         get_matched_keywords(
             title,
