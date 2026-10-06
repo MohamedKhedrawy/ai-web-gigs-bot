@@ -1,6 +1,11 @@
-import os
 import re
 from playwright.sync_api import sync_playwright
+
+from scrapers.browser_helper import (
+    create_browser,
+    create_stealth_page,
+    wait_for_cloudflare,
+)
 
 
 URL = "https://kafiil.com/projects"
@@ -10,33 +15,9 @@ def scrape_kafiil():
     jobs = []
     seen = set()
 
-    chromium_path = os.getenv("CHROMIUM_PATH")
-
     with sync_playwright() as p:
-
-        if chromium_path:
-            browser = p.chromium.launch(
-                headless=True,
-                executable_path=chromium_path,
-                args=[
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage"
-                ]
-            )
-        else:
-            # Local Windows
-            browser = p.chromium.launch(
-                headless=True,
-                channel="chrome"
-            )
-
-        page = browser.new_page(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/130.0.0.0 Safari/537.36"
-            )
-        )
+        browser = create_browser(p)
+        page = create_stealth_page(browser)
 
         print("Opening Kafiil...")
 
@@ -52,7 +33,7 @@ def scrape_kafiil():
                 response.status
             )
 
-        page.wait_for_timeout(3000)
+        wait_for_cloudflare(page)
 
         links = page.locator("a").all()
 

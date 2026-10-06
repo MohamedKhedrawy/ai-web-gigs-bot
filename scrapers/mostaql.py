@@ -1,6 +1,10 @@
-import os
-import re
 from playwright.sync_api import sync_playwright
+
+from scrapers.browser_helper import (
+    create_browser,
+    create_stealth_page,
+    wait_for_cloudflare,
+)
 
 
 URL = "https://mostaql.com/projects?sort=latest"
@@ -9,32 +13,9 @@ URL = "https://mostaql.com/projects?sort=latest"
 def scrape_mostaql():
     jobs = []
 
-    chromium_path = os.getenv("CHROMIUM_PATH")
-
     with sync_playwright() as p:
-
-        if chromium_path:
-            browser = p.chromium.launch(
-                headless=True,
-                executable_path=chromium_path,
-                args=[
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage"
-                ]
-            )
-        else:
-            browser = p.chromium.launch(
-                headless=True,
-                channel="chrome"
-            )
-
-        page = browser.new_page(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/130.0.0.0 Safari/537.36"
-            )
-        )
+        browser = create_browser(p)
+        page = create_stealth_page(browser)
 
         try:
             response = page.goto(
@@ -49,7 +30,7 @@ def scrape_mostaql():
                     response.status
                 )
 
-            page.wait_for_timeout(5000)
+            wait_for_cloudflare(page)
 
             # المشاريع بتكون في .project-row
             rows = page.locator(".project-row").all()
