@@ -1,3 +1,4 @@
+import os
 from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 
@@ -11,11 +12,21 @@ HEADERS = {
 
 
 def scrape_khamsat():
+    proxy_url = os.getenv("PROXY_URL")
+
+    proxies = None
+    if proxy_url:
+        proxies = {
+            "http": proxy_url,
+            "https": proxy_url
+        }
+
     response = cffi_requests.get(
         URL,
         headers=HEADERS,
         impersonate="chrome",
-        timeout=20
+        proxies=proxies,
+        timeout=30
     )
 
     print("Khamsat status:", response.status_code)
