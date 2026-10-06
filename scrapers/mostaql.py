@@ -1,82 +1,113 @@
-import requests
-from bs4 import BeautifulSoup
+import os
+import re
+from playwright.sync_api import sync_playwright
 
 
 URL = "https://mostaql.com/projects?sort=latest"
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/130.0.0.0 Safari/537.36"
-    ),
-    "Accept": (
-        "text/html,application/xhtml+xml,"
-        "application/xml;q=0.9,*/*;q=0.8"
-    ),
-    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://mostaql.com/",
-    "Connection": "keep-alive",
-}
-
 
 def scrape_mostaql():
-    response = requests.get(
-        URL,
-        headers=HEADERS,
-        timeout=20
-    )
-
-    response.raise_for_status()
-
-    soup = BeautifulSoup(
-        response.text,
-        "html.parser"
-    )
-
-    projects = soup.select(".project-row")
-
     jobs = []
 
-    for project in projects:
+    chromium_path = os.getenv("CHROMIUM_PATH")
 
-        title_element = project.select_one("h2 a")
+    with sync_playwright() as p:
 
-        if not title_element:
-            continue
-
-        title = title_element.get_text(
-            " ",
-            strip=True
-        )
-
-        link = title_element.get("href")
-
-        if not link:
-            continue
-
-        if link.startswith("/"):
-            link = "https://mostaql.com" + link
-
-        description_element = project.select_one(
-            ".project__brief"
-        )
-
-        description = (
-            description_element.get_text(
-                " ",
-                strip=True
+        if chromium_path:
+            browser = p.chromium.launch(
+                headless=True,
+                executable_path=chromium_path,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage"
+                ]
             )
-            if description_element
-            else ""
+        else:
+            browser = p.chromium.launch(
+                headless=True,
+                channel="chrome"
+            )
+
+        page = browser.new_page(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/130.0.0.0 Safari/537.36"
+            )
         )
 
-        jobs.append({
-            "title": title,
-            "url": link,
-            "description": description,
-            "platform": "Mostaql"
-        })
+        try:
+            response = page.goto(
+                URL,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
+            if response:
+                print(
+                    "Mostaql status:",
+                    response.status
+                )
+
+            page.wait_for_timeout(5000)
+
+            # المشاريع بتكون في .project-row
+            rows = page.locator(".project-row").all()
+
+            for row in rows:
+                try:
+                    title_el = row.locator("h2 a").first
+
+                    title = title_el.inner_text().strip()
+
+                    if not title:
+                        continue
+
+                    link = title_el.get_attribute("href")
+
+                    if not link:
+                        continue
+
+                    if link.startswith("/"):
+                        link = "https://mostaql.com" + link
+
+                    # الوصف
+                    desc_el = row.locator(
+                        ".project__brief"
+                    )
+
+                    try:
+                        description = desc_el.inner_text().strip()
+                    except Exception:
+                        description = ""
+
+                    jobs.append({
+                        "title": title,
+                        "url": link,
+                        "description": description,
+                        "platform": "Mostaql"
+                    })
+
+                except Exception:
+                    continue
+
+        except Exception as e:
+            print(f"Mostaql page error: {e}")
+
+        browser.close()
+
+    print(
+        "Mostaql jobs found:",
+        len(jobs)
+    )
 
     return jobs
+
+
+if __name__ == "__main__":
+    jobs = scrape_mostaql()
+
+    for job in jobs[:10]:
+        print("\n----------------")
+        print("Title:", job["title"])
+        print("URL:", job["url"])

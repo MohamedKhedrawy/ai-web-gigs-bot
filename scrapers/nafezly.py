@@ -1,72 +1,109 @@
-import requests
-from bs4 import BeautifulSoup
+import os
+from playwright.sync_api import sync_playwright
 
 
 URL = "https://nafezly.com/projects"
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/130.0.0.0 Safari/537.36"
-    ),
-    "Accept": (
-        "text/html,application/xhtml+xml,"
-        "application/xml;q=0.9,*/*;q=0.8"
-    ),
-    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://nafezly.com/",
-    "Connection": "keep-alive",
-}
-
 
 def scrape_nafezly():
-    response = requests.get(
-        URL,
-        headers=HEADERS,
-        timeout=20
-    )
-
-    response.raise_for_status()
-
-    soup = BeautifulSoup(
-        response.text,
-        "html.parser"
-    )
-
     jobs = []
+    seen = set()
 
-    # هنبدأ بالسحب العام للروابط
-    for link in soup.find_all("a", href=True):
+    chromium_path = os.getenv("CHROMIUM_PATH")
 
-        href = link.get("href", "")
-        title = link.get_text(
-            " ",
-            strip=True
+    with sync_playwright() as p:
+
+        if chromium_path:
+            browser = p.chromium.launch(
+                headless=True,
+                executable_path=chromium_path,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage"
+                ]
+            )
+        else:
+            browser = p.chromium.launch(
+                headless=True,
+                channel="chrome"
+            )
+
+        page = browser.new_page(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/130.0.0.0 Safari/537.36"
+            )
         )
 
-        if not title:
-            continue
+        try:
+            response = page.goto(
+                URL,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-        # روابط المشاريع فقط
-        if "/project/" not in href:
-            continue
+            if response:
+                print(
+                    "Nafezly status:",
+                    response.status
+                )
 
-        if href.startswith("/"):
-            href = "https://nafezly.com" + href
+            page.wait_for_timeout(5000)
 
-        jobs.append({
-            "title": title,
-            "url": href,
-            "description": "",
-            "platform": "Nafezly"
-        })
+            links = page.locator("a").all()
 
-    # إزالة التكرار
-    unique = {}
+            for link in links:
+                try:
+                    href = link.get_attribute("href")
 
-    for job in jobs:
-        unique[job["url"]] = job
+                    if not href:
+                        continue
 
-    return list(unique.values())
+                    # روابط المشاريع فقط
+                    if "/project/" not in href:
+                        continue
+
+                    title = link.inner_text().strip()
+
+                    if not title:
+                        continue
+
+                    if href.startswith("/"):
+                        href = "https://nafezly.com" + href
+
+                    if href in seen:
+                        continue
+
+                    seen.add(href)
+
+                    jobs.append({
+                        "title": title,
+                        "url": href,
+                        "description": "",
+                        "platform": "Nafezly"
+                    })
+
+                except Exception:
+                    continue
+
+        except Exception as e:
+            print(f"Nafezly page error: {e}")
+
+        browser.close()
+
+    print(
+        "Nafezly jobs found:",
+        len(jobs)
+    )
+
+    return jobs
+
+
+if __name__ == "__main__":
+    jobs = scrape_nafezly()
+
+    for job in jobs[:10]:
+        print("\n----------------")
+        print("Title:", job["title"])
+        print("URL:", job["url"])

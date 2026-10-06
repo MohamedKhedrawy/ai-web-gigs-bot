@@ -1,86 +1,113 @@
-import requests
-from bs4 import BeautifulSoup
+import os
+from playwright.sync_api import sync_playwright
 
 
 URL = "https://khamsat.com/community/requests"
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/130.0.0.0 Safari/537.36"
-    ),
-    "Accept": (
-        "text/html,application/xhtml+xml,"
-        "application/xml;q=0.9,*/*;q=0.8"
-    ),
-    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://khamsat.com/",
-    "Connection": "keep-alive",
-}
-
 
 def scrape_khamsat():
-
-    response = requests.get(
-        URL,
-        headers=HEADERS,
-        timeout=20
-    )
-
-    response.raise_for_status()
-
-    soup = BeautifulSoup(
-        response.text,
-        "html.parser"
-    )
-
     jobs = []
+    seen = set()
 
-    for link in soup.find_all("a", href=True):
+    chromium_path = os.getenv("CHROMIUM_PATH")
 
-        href = link.get("href", "")
-        title = link.get_text(
-            " ",
-            strip=True
+    with sync_playwright() as p:
+
+        if chromium_path:
+            browser = p.chromium.launch(
+                headless=True,
+                executable_path=chromium_path,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage"
+                ]
+            )
+        else:
+            browser = p.chromium.launch(
+                headless=True,
+                channel="chrome"
+            )
+
+        page = browser.new_page(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/130.0.0.0 Safari/537.36"
+            )
         )
 
-        if not title:
-            continue
+        try:
+            response = page.goto(
+                URL,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-        # لازم يكون رابط طلب
-        if "/community/requests/" not in href:
-            continue
+            if response:
+                print(
+                    "Khamsat status:",
+                    response.status
+                )
 
-        # استبعاد إنشاء موضوع جديد
-        if href.endswith("/new"):
-            continue
+            page.wait_for_timeout(5000)
 
-        if title == "موضوع جديد":
-            continue
+            links = page.locator("a").all()
 
-        if href.startswith("/"):
-            href = "https://khamsat.com" + href
+            for link in links:
+                try:
+                    href = link.get_attribute("href")
 
-        jobs.append({
-            "title": title,
-            "url": href,
-            "description": "",
-            "platform": "Khamsat"
-        })
+                    if not href:
+                        continue
 
-    # Remove duplicates
-    unique = {}
+                    # لازم يكون رابط طلب
+                    if "/community/requests/" not in href:
+                        continue
 
-    for job in jobs:
-        unique[job["url"]] = job
+                    # استبعاد إنشاء موضوع جديد
+                    if href.endswith("/new"):
+                        continue
 
-    return list(unique.values())
+                    title = link.inner_text().strip()
+
+                    if not title:
+                        continue
+
+                    if title == "موضوع جديد":
+                        continue
+
+                    if href.startswith("/"):
+                        href = "https://khamsat.com" + href
+
+                    if href in seen:
+                        continue
+
+                    seen.add(href)
+
+                    jobs.append({
+                        "title": title,
+                        "url": href,
+                        "description": "",
+                        "platform": "Khamsat"
+                    })
+
+                except Exception:
+                    continue
+
+        except Exception as e:
+            print(f"Khamsat page error: {e}")
+
+        browser.close()
+
+    print(
+        "Khamsat jobs found:",
+        len(jobs)
+    )
+
+    return jobs
 
 
 if __name__ == "__main__":
-
     jobs = scrape_khamsat()
 
     print(
@@ -89,7 +116,6 @@ if __name__ == "__main__":
     )
 
     for job in jobs[:10]:
-
         print("\n----------------")
         print(job["title"])
         print(job["url"])
