@@ -1,101 +1,82 @@
-from playwright.sync_api import sync_playwright
-
-from scrapers.browser_helper import (
-    create_browser,
-    create_stealth_page,
-    wait_for_cloudflare,
-)
+from curl_cffi import requests as cffi_requests
+from bs4 import BeautifulSoup
 
 
 URL = "https://khamsat.com/community/requests"
 
+HEADERS = {
+    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+    "Referer": "https://khamsat.com/",
+}
+
 
 def scrape_khamsat():
+    response = cffi_requests.get(
+        URL,
+        headers=HEADERS,
+        impersonate="chrome",
+        timeout=20
+    )
+
+    print("Khamsat status:", response.status_code)
+
+    response.raise_for_status()
+
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser"
+    )
+
     jobs = []
-    seen = set()
 
-    with sync_playwright() as p:
-        browser = create_browser(p)
-        page = create_stealth_page(browser)
+    for link in soup.find_all("a", href=True):
 
-        try:
-            response = page.goto(
-                URL,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+        href = link.get("href", "")
+        title = link.get_text(
+            " ",
+            strip=True
+        )
 
-            if response:
-                print(
-                    "Khamsat status:",
-                    response.status
-                )
+        if not title:
+            continue
 
-            wait_for_cloudflare(page)
+        # لازم يكون رابط طلب
+        if "/community/requests/" not in href:
+            continue
 
-            links = page.locator("a").all()
+        # استبعاد إنشاء موضوع جديد
+        if href.endswith("/new"):
+            continue
 
-            for link in links:
-                try:
-                    href = link.get_attribute("href")
+        if title == "موضوع جديد":
+            continue
 
-                    if not href:
-                        continue
+        if href.startswith("/"):
+            href = "https://khamsat.com" + href
 
-                    # لازم يكون رابط طلب
-                    if "/community/requests/" not in href:
-                        continue
+        jobs.append({
+            "title": title,
+            "url": href,
+            "description": "",
+            "platform": "Khamsat"
+        })
 
-                    # استبعاد إنشاء موضوع جديد
-                    if href.endswith("/new"):
-                        continue
+    # Remove duplicates
+    unique = {}
 
-                    title = link.inner_text().strip()
-
-                    if not title:
-                        continue
-
-                    if title == "موضوع جديد":
-                        continue
-
-                    if href.startswith("/"):
-                        href = "https://khamsat.com" + href
-
-                    if href in seen:
-                        continue
-
-                    seen.add(href)
-
-                    jobs.append({
-                        "title": title,
-                        "url": href,
-                        "description": "",
-                        "platform": "Khamsat"
-                    })
-
-                except Exception:
-                    continue
-
-        except Exception as e:
-            print(f"Khamsat page error: {e}")
-
-        browser.close()
+    for job in jobs:
+        unique[job["url"]] = job
 
     print(
         "Khamsat jobs found:",
-        len(jobs)
+        len(unique)
     )
 
-    return jobs
+    return list(unique.values())
 
 
 if __name__ == "__main__":
     jobs = scrape_khamsat()
-
-    print(
-        "Khamsat jobs found:",
-        len(jobs)
-    )
 
     for job in jobs[:10]:
         print("\n----------------")

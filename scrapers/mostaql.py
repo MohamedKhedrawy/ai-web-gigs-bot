@@ -1,81 +1,75 @@
-from playwright.sync_api import sync_playwright
-
-from scrapers.browser_helper import (
-    create_browser,
-    create_stealth_page,
-    wait_for_cloudflare,
-)
+from curl_cffi import requests as cffi_requests
+from bs4 import BeautifulSoup
 
 
 URL = "https://mostaql.com/projects?sort=latest"
 
+HEADERS = {
+    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+    "Referer": "https://mostaql.com/",
+}
+
 
 def scrape_mostaql():
+    response = cffi_requests.get(
+        URL,
+        headers=HEADERS,
+        impersonate="chrome",
+        timeout=20
+    )
+
+    print("Mostaql status:", response.status_code)
+
+    response.raise_for_status()
+
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser"
+    )
+
+    projects = soup.select(".project-row")
+
     jobs = []
 
-    with sync_playwright() as p:
-        browser = create_browser(p)
-        page = create_stealth_page(browser)
+    for project in projects:
 
-        try:
-            response = page.goto(
-                URL,
-                wait_until="domcontentloaded",
-                timeout=60000
+        title_element = project.select_one("h2 a")
+
+        if not title_element:
+            continue
+
+        title = title_element.get_text(
+            " ",
+            strip=True
+        )
+
+        link = title_element.get("href")
+
+        if not link:
+            continue
+
+        if link.startswith("/"):
+            link = "https://mostaql.com" + link
+
+        description_element = project.select_one(
+            ".project__brief"
+        )
+
+        description = (
+            description_element.get_text(
+                " ",
+                strip=True
             )
+            if description_element
+            else ""
+        )
 
-            if response:
-                print(
-                    "Mostaql status:",
-                    response.status
-                )
-
-            wait_for_cloudflare(page)
-
-            # المشاريع بتكون في .project-row
-            rows = page.locator(".project-row").all()
-
-            for row in rows:
-                try:
-                    title_el = row.locator("h2 a").first
-
-                    title = title_el.inner_text().strip()
-
-                    if not title:
-                        continue
-
-                    link = title_el.get_attribute("href")
-
-                    if not link:
-                        continue
-
-                    if link.startswith("/"):
-                        link = "https://mostaql.com" + link
-
-                    # الوصف
-                    desc_el = row.locator(
-                        ".project__brief"
-                    )
-
-                    try:
-                        description = desc_el.inner_text().strip()
-                    except Exception:
-                        description = ""
-
-                    jobs.append({
-                        "title": title,
-                        "url": link,
-                        "description": description,
-                        "platform": "Mostaql"
-                    })
-
-                except Exception:
-                    continue
-
-        except Exception as e:
-            print(f"Mostaql page error: {e}")
-
-        browser.close()
+        jobs.append({
+            "title": title,
+            "url": link,
+            "description": description,
+            "platform": "Mostaql"
+        })
 
     print(
         "Mostaql jobs found:",

@@ -1,85 +1,72 @@
-from playwright.sync_api import sync_playwright
-
-from scrapers.browser_helper import (
-    create_browser,
-    create_stealth_page,
-    wait_for_cloudflare,
-)
+from curl_cffi import requests as cffi_requests
+from bs4 import BeautifulSoup
 
 
 URL = "https://nafezly.com/projects"
 
+HEADERS = {
+    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+    "Referer": "https://nafezly.com/",
+}
+
 
 def scrape_nafezly():
+    response = cffi_requests.get(
+        URL,
+        headers=HEADERS,
+        impersonate="chrome",
+        timeout=20
+    )
+
+    print("Nafezly status:", response.status_code)
+
+    response.raise_for_status()
+
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser"
+    )
+
     jobs = []
-    seen = set()
 
-    with sync_playwright() as p:
-        browser = create_browser(p)
-        page = create_stealth_page(browser)
+    # هنبدأ بالسحب العام للروابط
+    for link in soup.find_all("a", href=True):
 
-        try:
-            response = page.goto(
-                URL,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+        href = link.get("href", "")
+        title = link.get_text(
+            " ",
+            strip=True
+        )
 
-            if response:
-                print(
-                    "Nafezly status:",
-                    response.status
-                )
+        if not title:
+            continue
 
-            wait_for_cloudflare(page)
+        # روابط المشاريع فقط
+        if "/project/" not in href:
+            continue
 
-            links = page.locator("a").all()
+        if href.startswith("/"):
+            href = "https://nafezly.com" + href
 
-            for link in links:
-                try:
-                    href = link.get_attribute("href")
+        jobs.append({
+            "title": title,
+            "url": href,
+            "description": "",
+            "platform": "Nafezly"
+        })
 
-                    if not href:
-                        continue
+    # إزالة التكرار
+    unique = {}
 
-                    # روابط المشاريع فقط
-                    if "/project/" not in href:
-                        continue
-
-                    title = link.inner_text().strip()
-
-                    if not title:
-                        continue
-
-                    if href.startswith("/"):
-                        href = "https://nafezly.com" + href
-
-                    if href in seen:
-                        continue
-
-                    seen.add(href)
-
-                    jobs.append({
-                        "title": title,
-                        "url": href,
-                        "description": "",
-                        "platform": "Nafezly"
-                    })
-
-                except Exception:
-                    continue
-
-        except Exception as e:
-            print(f"Nafezly page error: {e}")
-
-        browser.close()
+    for job in jobs:
+        unique[job["url"]] = job
 
     print(
         "Nafezly jobs found:",
-        len(jobs)
+        len(unique)
     )
 
-    return jobs
+    return list(unique.values())
 
 
 if __name__ == "__main__":
